@@ -3,7 +3,12 @@ import controls from "./controls";
 import { screenToMapCoords, mapToScreenCoords, rand } from "./helpers";
 import { MOVEMENT_SPEED, TURN_SPEED } from "./consts";
 
+import axe from "../assets/axe.png";
+import log from "../assets/log.png";
+import ground from "../assets/ground.png";
 import "../styles/index.scss";
+import { generateTree } from "./Entities/Tree";
+import { generateStone } from "./Entities/Stone";
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -11,48 +16,65 @@ const ctx = canvas.getContext("2d");
 const viewWidth = window.innerWidth;
 const viewHeight = window.innerHeight;
 
-export const mapSize = 1000;
+export const mapSize = 10000;
 
 export const halfWidth = viewWidth / 2;
 export const halfHeight = viewHeight / 2;
 
+const mapBounds = {
+  x1: player.radius,
+  x2: mapSize - player.radius,
+  y1: player.radius,
+  y2: mapSize - player.radius,
+};
+
 canvas.width = viewWidth;
 canvas.height = viewHeight;
 
-export const mapElements = new Array(10).fill().map(() => ({
-  x: rand(0, viewWidth),
-  y: rand(0, viewHeight),
-  height: rand(60, 100),
-  width: rand(60, 100),
-}));
+const axeImg = new Image();
+axeImg.src = axe;
+
+const groundImg = new Image();
+groundImg.src = ground;
+
+const logImg = new Image();
+logImg.src = log;
+
+const playerImg = new Image();
+playerImg.src = `src/assets/survivor/knife/idle/survivor-idle_knife_0.png`;
+
+const trees = new Array(1000).fill().map(generateTree);
+
+const stones = new Array(1000).fill().map(generateStone);
+
+export const mapElements = [...trees, ...stones];
 
 function updatePointerPosition(e) {
-  controls.mouseX = e.offsetX;
-  controls.mouseY = e.offsetY;
+  if (e.target.touches) {
+    controls.mouseX = e.target.touches[0].clientX;
+    controls.mouseY = e.target.touches[0].clientY;
+  } else {
+    controls.mouseX = e.clientX;
+    controls.mouseY = e.clientY;
+  }
 }
 
 const pointerUp = (e) => {
-  if (e.which === 1) {
-    controls.mouse1 = false;
-  }
-  if (e.which === 3) {
-    controls.mouse2 = false;
-  }
+  controls.mouse1 = false;
+};
+
+const pointerDown = (e) => {
+  controls.mouse1 = true;
 };
 
 canvas.addEventListener("mousemove", updatePointerPosition);
+canvas.addEventListener("touchmove", updatePointerPosition);
 
-canvas.addEventListener("mousedown", (e) => {
-  if (e.which === 1) {
-    controls.mouse1 = true;
-  }
-  if (e.which === 3) {
-    controls.mouse2 = true;
-    player.setDestination(true);
-  }
-});
+canvas.addEventListener("mousedown", pointerDown);
+canvas.addEventListener("touchstart", pointerDown);
 
 document.addEventListener("mouseup", pointerUp);
+document.addEventListener("touchup", pointerUp);
 
 canvas.addEventListener("contextmenu", (e) => {
   e.preventDefault();
@@ -72,28 +94,23 @@ function loop() {
 
   ctx.clearRect(0, 0, viewWidth, viewHeight);
 
-  if (controls.mouse2) {
-    player.setDestination();
-  }
+  if (controls.mouse1) {
+    const mapCoords = screenToMapCoords(controls.mouseX, controls.mouseY);
 
-  if (player.destination) {
-    const distance = Math.hypot(
-      player.x - player.destination.x,
-      player.y - player.destination.y
+    const tree = trees.find(
+      (el) =>
+        mapCoords.x >= el.playerBounds.x1 &&
+        mapCoords.x <= el.playerBounds.x2 &&
+        mapCoords.y >= el.playerBounds.y1 &&
+        mapCoords.y <= el.playerBounds.y2
     );
 
-    if (distance > 2) {
-      const p = (MOVEMENT_SPEED * (frameTime / 1000)) / distance;
+    player.setTarget(tree);
+  }
 
-      const x = player.x + p * (player.destination.x - player.x);
-      const y = player.y + p * (player.destination.y - player.y);
-
-      player.x = x;
-      player.y = y;
-    } else {
-      player.x = player.destination.x;
-      player.y = player.destination.y;
-      player.destination = null;
+  if (player.target) {
+    if (player.wcStart + 1000 < time) {
+      player.woodcut();
     }
   }
 
@@ -108,7 +125,9 @@ function loop() {
       ccw = true;
     }
 
-    const p = (TURN_SPEED * (frameTime / 1000)) / turnDistance;
+    const toTurn = (TURN_SPEED * (frameTime / 1000)) / turnDistance;
+
+    const p = Math.min(toTurn, turnDistance);
 
     if (ccw) {
       // todo: fix perpetual rotation
@@ -131,9 +150,65 @@ function loop() {
     }
   }
 
+  // if (!player.facingTarget && player.destination) {
+  if (player.destination != null) {
+    const distance = Math.hypot(
+      player.x - player.destination.x,
+      player.y - player.destination.y
+    );
+
+    const toMove = (MOVEMENT_SPEED * (frameTime / 1000)) / distance;
+
+    let x, y;
+
+    if (toMove < distance) {
+      const px = toMove * (player.destination.x - player.x);
+      const py = toMove * (player.destination.y - player.y);
+
+      x = player.x + px;
+      y = player.y + py;
+    } else {
+      x = player.destination.x;
+      y = player.destination.y;
+      player.destination = null;
+    }
+
+    let collision = false;
+
+    // check collisions for new position
+    mapElements
+      .filter((el) => !el.dead)
+      .forEach((el) => {
+        if (
+          x >= el.playerBounds.x1 &&
+          x <= el.playerBounds.x2 &&
+          y >= el.playerBounds.y1 &&
+          y <= el.playerBounds.y2
+        ) {
+          collision = true;
+        }
+      });
+
+    if (
+      x <= mapBounds.x1 ||
+      x >= mapBounds.x2 ||
+      y <= mapBounds.y1 ||
+      y >= mapBounds.y2
+    ) {
+      collision = true;
+    }
+
+    if (!collision) {
+      player.x = x;
+      player.y = y;
+    } else {
+      player.destination = null;
+    }
+  }
+
   // play area
   const playAreaScreenCoords = mapToScreenCoords(mapSize, mapSize);
-  ctx.fillStyle = "#ccc";
+  ctx.fillStyle = "#544321";
   ctx.fillRect(
     Math.max(0, halfWidth - player.x),
     Math.max(0, halfHeight - player.y),
@@ -141,11 +216,64 @@ function loop() {
     Math.min(viewHeight, playAreaScreenCoords.y)
   );
 
-  // map elements
-  ctx.fillStyle = "#222";
+  const tileSize = 96;
+
+  for (let x = 0; x < viewWidth / tileSize + 1; x++) {
+    for (let y = 0; y < viewHeight / tileSize + 1; y++) {
+      ctx.drawImage(
+        groundImg,
+        x * tileSize - (player.x % tileSize),
+        y * tileSize - (player.y % tileSize),
+        tileSize,
+        tileSize
+      );
+    }
+  }
+
+  ctx.fillStyle = "rgba(80, 57, 23, 0.8)";
   mapElements.forEach((el) => {
+    const elCoords = mapToScreenCoords(el.playerBounds.x1, el.playerBounds.y1);
+    ctx.fillRect(elCoords.x, elCoords.y, el.boundWidth, el.boundHeight);
+  });
+
+  // map elements
+  stones.forEach((el) => {
     const elCoords = mapToScreenCoords(el.x, el.y);
-    ctx.fillRect(elCoords.x, elCoords.y, el.width, el.height);
+
+    if (
+      elCoords.x > viewWidth ||
+      elCoords.y > viewHeight ||
+      elCoords.x + el.width < 0 ||
+      elCoords.y + el.height < 0
+    ) {
+      return;
+    }
+
+    // ctx.setTransform(1, 0, 0, 1, halfWidth, halfHeight);
+    // ctx.rotate(0);
+    ctx.drawImage(el.img, elCoords.x, elCoords.y, el.width, el.height);
+    // ctx.setTransform(1, 0, 0, 1, 0, 0);
+  });
+  trees.forEach((el) => {
+    if (el.dead) {
+      return;
+    }
+
+    const elCoords = mapToScreenCoords(el.x, el.y);
+
+    if (
+      elCoords.x > viewWidth ||
+      elCoords.y > viewHeight ||
+      elCoords.x + el.width < 0 ||
+      elCoords.y + el.height < 0
+    ) {
+      return;
+    }
+
+    // ctx.setTransform(1, 0, 0, 1, halfWidth, halfHeight);
+    // ctx.rotate(0);
+    ctx.drawImage(el.img, elCoords.x, elCoords.y, el.width, el.height);
+    // ctx.setTransform(1, 0, 0, 1, 0, 0);
   });
 
   // destination target marker
@@ -171,24 +299,40 @@ function loop() {
   }
 
   // player
-  ctx.beginPath();
-  ctx.fillStyle = "#666";
-  ctx.strokeStyle = "#222";
-  ctx.lineWidth = 5;
-  ctx.arc(halfWidth, halfHeight, 15, 0, Math.PI * 2);
-  ctx.closePath();
-  ctx.stroke();
-  ctx.fill();
+  // ctx.beginPath();
+  // ctx.fillStyle = "#666";
+  // ctx.strokeStyle = "#222";
+  // ctx.lineWidth = 3;
+  // ctx.arc(halfWidth, halfHeight, player.radius, 0, Math.PI * 2);
+  // ctx.closePath();
+  // ctx.fill();
+  // ctx.stroke();
 
-  const x = halfWidth + 10 * Math.cos(player.facing);
-  const y = halfHeight + 10 * Math.sin(player.facing);
+  // const x = halfWidth + 10 * Math.cos(player.facing);
+  // const y = halfHeight + 10 * Math.sin(player.facing);
 
-  // facing dot
-  ctx.beginPath();
-  ctx.fillStyle = "#a34";
-  ctx.arc(x, y, 6, 0, Math.PI * 2);
-  ctx.closePath();
-  ctx.fill();
+  // // facing dot
+  // ctx.beginPath();
+  // ctx.fillStyle = "#a34";
+  // ctx.arc(x, y, 6, 0, Math.PI * 2);
+  // ctx.closePath();
+  // ctx.fill();
+
+  ctx.setTransform(0.2, 0, 0, 0.2, halfWidth, halfHeight);
+  ctx.rotate(player.facing);
+  ctx.drawImage(playerImg, -289 / 2, -224 / 2);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // axe
+  if (player.wcStart) {
+    const percent = (time - 600 - player.wcStart) / 400;
+    if (percent > 0 && percent <= 1) {
+      ctx.setTransform(1, 0, 0, 1, halfWidth, halfHeight);
+      ctx.rotate(player.facing + percent * 1.5);
+      ctx.drawImage(axeImg, 0, -60);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+  }
 
   // out of bounds
   // todo: optimize
@@ -220,9 +364,26 @@ function loop() {
     );
   }
 
+  const cellSize = 50;
+  const padding = 8;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(10, viewHeight - cellSize - 10, cellSize, cellSize);
+  ctx.drawImage(
+    logImg,
+    10 + padding,
+    viewHeight - cellSize - 10 + padding,
+    cellSize - padding * 2,
+    cellSize - padding * 2
+  );
+  ctx.font = "20px monospace";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#ed4";
+  ctx.fillText(player.logs, 10 + 2, viewHeight - cellSize - 10 + 2);
+
   lastFrameTime = time;
 
   requestAnimationFrame(loop);
+  // setTimeout(loop, 16);
 }
 
 loop();

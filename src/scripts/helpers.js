@@ -1,9 +1,9 @@
 import player from "./player";
 import { halfWidth, halfHeight, mapSize } from "./index";
 
-export function screenToMapCoords(x, y) {
-  x += player.x - halfWidth;
-  y += player.y - halfHeight;
+export function screenToMapCoords(_x, _y) {
+  let x = _x + player.x - halfWidth;
+  let y = _y + player.y - halfHeight;
 
   // fit to map
   if (x < 0) {
@@ -21,9 +21,9 @@ export function screenToMapCoords(x, y) {
   return { x, y };
 }
 
-export function mapToScreenCoords(x, y) {
-  x = x - player.x + halfWidth;
-  y = y - player.y + halfHeight;
+export function mapToScreenCoords(_x, _y) {
+  const x = _x - player.x + halfWidth;
+  const y = _y - player.y + halfHeight;
 
   return { x, y };
 }
